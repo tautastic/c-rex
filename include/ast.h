@@ -12,7 +12,7 @@ typedef struct Node {
 
 void print_tree(Node *node, const char *prefix, int is_last);
 
-Node *create_node();
+Node *create_node(const char *label);
 
 void free_node(Node *node);
 

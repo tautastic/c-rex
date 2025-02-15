@@ -28,5 +28,7 @@ Node *atom(const char *pattern, size_t *pos);
 
 Node *literal(const char *pattern, size_t *pos);
 
+Node *decimal_digits(const char *pattern, size_t *pos);
+
 Node *build_syntax_tree(const char *pattern);
 

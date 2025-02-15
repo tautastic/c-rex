@@ -20,6 +20,7 @@ void print_tree(Node *node, const char *prefix, const int is_last) {
 Node *create_node(const char *label) {
     Node *node = malloc(sizeof(Node));
     strncpy(node->label, label, 15);
+    node->label[15] = '\0';
     node->sub = NULL;
     node->sub_count = 0;
     return node;
@@ -30,11 +31,13 @@ void free_node(Node *node) {
         return;
     }
 
-    for (size_t i = 0; i < node->sub_count; i++) {
-        free_node(node->sub[i]);
+    if (node->sub) {
+        for (size_t i = 0; i < node->sub_count; i++) {
+            free_node(node->sub[i]);
+        }
+        free(node->sub);
     }
 
-    free(node->sub);
     free(node);
 }
 
