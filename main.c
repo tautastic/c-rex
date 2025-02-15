@@ -1,11 +1,12 @@
-#include "rrange.h"
-#include "charclass.h"
+#include "lexer.h"
 
 int main(void) {
-    RuneRange rr = PERL_DIGIT;
+    const char *pattern = "a(b|c)";
 
-    rrange_print(&rr);
-    rrange_free(&rr);
+    Node *root = build_syntax_tree(pattern);
+
+    print_tree(root, "", 1);
+    free_node(root);
 
     return 0;
 }

@@ -1,6 +1,6 @@
 #include "lexer.h"
 
-bool is_special(const rune c) {
+bool is_special(const char c) {
     return (c >= 33 && c <= 47) || (c >= 58 && c <= 64) || (c >= 91 && c <= 96) || (c >= 123 && c <= 125);
 }
 
@@ -72,10 +72,13 @@ Node *root(const char *pattern, size_t *pos) {
 
 Node *expr(const char *pattern, size_t *pos) {
     Node *node = create_node("<Expr>");
-    add_child(node, branch(pattern, pos));
+    Node *branch_node = branch(pattern, pos);
+    add_child(node, branch_node);
 
-    while (match(pattern, pos, "|")) {
+    if (match(pattern, pos, "|")) {
         add_child(node, branch(pattern, pos));
+    } else {
+        add_child(branch_node, piece(pattern, pos));
     }
 
     return node;
@@ -83,18 +86,22 @@ Node *expr(const char *pattern, size_t *pos) {
 
 Node *branch(const char *pattern, size_t *pos) {
     Node *node = create_node("<Branch>");
-    add_child(node, piece(pattern, pos));
+
+    const char *peek_ptr = peek(pattern, pos, 0);
+    if (peek_ptr && *peek_ptr != '\0') {
+        add_child(node, piece(pattern, pos));
+    }
 
     return node;
 }
 
 Node *piece(const char *pattern, size_t *pos) {
-    Node *node = create_node("<Piece>");
-    const char *peek_ptr = peek(pattern, pos, 0);
-    while (peek_ptr && *peek_ptr != '\0') {
-        add_child(node, atom(pattern, pos));
-        peek_ptr = peek(pattern, pos, 0);
+    Node *atom_node = atom(pattern, pos);
+    if (!atom_node) {
+        return NULL;
     }
+    Node *node = create_node("<Piece>");
+    add_child(node, atom_node);
 
     return node;
 }
@@ -106,8 +113,38 @@ Node *piece(const char *pattern, size_t *pos) {
 Node *atom(const char *pattern, size_t *pos) {
     Node *node = create_node("<Atom>");
     const char *peek_ptr = peek(pattern, pos, 0);
-    if (peek_ptr && !is_special(*peek_ptr)) {
-        add_child(node, literal(pattern, pos));
+    if (peek_ptr) {
+        switch (*peek_ptr) {
+            case '.': {
+                match(pattern, pos, ".");
+                add_child(node, create_node("<Dot>"));
+                break;
+            }
+            case '\\': {
+                match(pattern, pos, "\\");
+                //add_child(node, atom_escape(pattern, pos));
+                break;
+            }
+            case '[': {
+                //add_child(node, char_class(pattern, pos));
+                break;
+            }
+            case '(': {
+                match(pattern, pos, "(");
+                Node *expr_node = expr(pattern, pos);
+                match(pattern, pos, ")");
+                add_child(node, expr_node);
+                break;
+            }
+            default: {
+                if (is_special(*peek_ptr)) {
+                    free_node(node);
+                    return NULL;
+                }
+                add_child(node, literal(pattern, pos));
+                break;
+            }
+        }
     }
 
     return node;
@@ -116,13 +153,12 @@ Node *atom(const char *pattern, size_t *pos) {
 Node *literal(const char *pattern, size_t *pos) {
     Node *node = create_node("<Literal>");
     const char *next_ptr = next(pattern, pos, 0);
-    if (next_ptr != NULL) {
-        rune next_rune;
-        utf8codepoint(next_ptr, &next_rune);
-        Node *lit_val = create_node("");
-        utf8catcodepoint(lit_val->label, next_rune, 15);
-        add_child(node, lit_val);
-    }
+    rune peek_rune;
+    utf8codepoint(next_ptr, &peek_rune);
+
+    Node *lit_val = create_node("");
+    utf8catcodepoint(lit_val->label, peek_rune, 15);
+    add_child(node, lit_val);
 
     return node;
 }
