@@ -8,6 +8,18 @@ bool is_digit(const char c) {
     return '0' <= c && c <= '9';
 }
 
+bool is_upercase_letter(const char c) {
+    return 'A' <= c && c <= 'Z';
+}
+
+bool is_lowercase_letter(const char c) {
+    return 'a' <= c && c <= 'z';
+}
+
+bool is_hex(const char c) {
+    return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F');
+}
+
 const char *peek(const char *pattern, const size_t *pos, const size_t lookahead) {
     if (!pattern || !pos) {
         return NULL;
@@ -93,7 +105,7 @@ Node *branch(const char *pattern, size_t *pos) {
     Node *node = create_node("<Branch>");
 
     const char *peek_ptr = peek(pattern, pos, 0);
-    while (peek_ptr && *peek_ptr != '\0' && *peek_ptr != ')') {
+    while (peek_ptr && *peek_ptr != '\0' && *peek_ptr != ')' && *peek_ptr != '}') {
         add_child(node, piece(pattern, pos));
         peek_ptr = peek(pattern, pos, 0);
     }
@@ -213,7 +225,12 @@ Node *atom(const char *pattern, size_t *pos) {
         }
         case '\\': {
             match(pattern, pos, "\\");
-            //add_child(node, atom_escape(pattern, pos));
+            Node *child_node = atom_escape(pattern, pos);
+            if (!child_node) {
+                free_node(node);
+                return NULL;
+            }
+            add_child(node, child_node);
             break;
         }
         case '[': {
@@ -235,6 +252,135 @@ Node *atom(const char *pattern, size_t *pos) {
             add_child(node, literal(pattern, pos));
         }
     }
+
+    return node;
+}
+
+Node *atom_escape(const char *pattern, size_t *pos) {
+    const char *peek_ptr = peek(pattern, pos, 0);
+    if (!peek_ptr) {
+        return NULL;
+    }
+    Node *node = NULL;
+    const char peek_ch = *peek_ptr;
+
+    switch (peek_ch) {
+        case 'f':
+        case 'n':
+        case 'r':
+        case 't':
+        case 'v': {
+            match(pattern, pos, peek_ptr);
+            node = create_node("<Control>");
+            add_child(node, create_node(peek_ptr));
+            break;
+        }
+
+        case 'd':
+        case 'D':
+        case 's':
+        case 'S':
+        case 'w':
+        case 'W': {
+            match(pattern, pos, peek_ptr);
+            node = create_node("<Perl>");
+            add_child(node, create_node(peek_ptr));
+            break;
+        }
+
+        case 'x': {
+            match(pattern, pos, "x");
+            Node *hex = hex_sequence(pattern, pos);
+            if (!hex) {
+                return NULL;
+            }
+            node = create_node("<HexSeq>");
+            add_child(node, hex);
+            break;
+        }
+
+        case 'p':
+        case 'P': {
+            Node *uni = unicode_sequence(pattern, pos);
+            if (!uni) {
+                return NULL;
+            }
+            node = create_node("<UniSeq>");
+            add_child(node, uni);
+            break;
+        }
+
+        default: {
+            return NULL;
+        }
+    }
+
+    return node;
+}
+
+Node *hex_sequence(const char *pattern, size_t *pos) {
+    if (!match(pattern, pos, "{")) {
+        return NULL;
+    }
+    const char *peek_ptr = peek(pattern, pos, 0);
+    if (!peek_ptr || !is_hex(*peek_ptr)) {
+        return NULL;
+    }
+    Node *node = create_node("");
+    size_t len = 0;
+    while (len < 4 && *peek_ptr && is_hex(*peek_ptr)) {
+        node->label[len++] = *peek_ptr;
+        peek_ptr = next(pattern, pos, 0);
+    }
+
+    if (!match(pattern, pos, "}")) {
+        free_node(node);
+        return NULL;
+    }
+    return node;
+}
+
+Node *unicode_sequence(const char *pattern, size_t *pos) {
+    const char *p_char = peek(pattern, pos, 0);
+    if (!p_char || (*p_char != 'p' && *p_char != 'P')) {
+        return NULL;
+    }
+    const bool is_negated = *p_char == 'P';
+    if (!match(pattern, pos, p_char)) {
+        return NULL;
+    }
+
+    if (!match(pattern, pos, "{")) {
+        return NULL;
+    }
+
+    const char *upper_ptr = peek(pattern, pos, 0);
+    if (!upper_ptr || !is_upercase_letter(*upper_ptr)) {
+        return NULL;
+    }
+    const char upper = *upper_ptr;
+    if (!match(pattern, pos, upper_ptr)) {
+        return NULL;
+    }
+
+    const char *lower_ptr = peek(pattern, pos, 0);
+    if (!lower_ptr || !is_lowercase_letter(*lower_ptr)) {
+        return NULL;
+    }
+    const char lower = *lower_ptr;
+    if (!match(pattern, pos, lower_ptr)) {
+        return NULL;
+    }
+
+    if (!match(pattern, pos, "}")) {
+        return NULL;
+    }
+
+    Node *node = create_node(is_negated ? "^" : "");
+    const size_t base = is_negated ? 1 : 0;
+    node->label[base] = upper;
+    node->label[base + 1] = lower;
+    node->label[base + 2] = '\0';
 
     return node;
 }

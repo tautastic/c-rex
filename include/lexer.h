@@ -26,6 +26,12 @@ Node *quantifier(const char *pattern, size_t *pos);
 
 Node *atom(const char *pattern, size_t *pos);
 
+Node *atom_escape(const char *pattern, size_t *pos);
+
+Node *hex_sequence(const char *pattern, size_t *pos);
+
+Node *unicode_sequence(const char *pattern, size_t *pos);
+
 Node *literal(const char *pattern, size_t *pos);
 
 Node *decimal_digits(const char *pattern, size_t *pos);
