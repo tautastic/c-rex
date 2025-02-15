@@ -1,10 +1,12 @@
 #include "lexer.h"
 
 bool is_special(const char c) {
-    return (c >= 33 && c <= 47) ||
-           (c >= 58 && c <= 64) ||
-           (c >= 91 && c <= 96) ||
-           (c >= 123 && c <= 125);
+    return c == '.' || c == '^' || c == '$' || c == '*' || c == '+' || c == '?' ||
+           c == '(' || c == ')' || c == '[' || c == '{' || c == '\\' || c == '|' || c == ']';
+}
+
+bool is_special_in_class(const char c) {
+    return c == '^' || c == '-' || c == ']' || c == '\\';
 }
 
 bool is_digit(const char c) {
@@ -25,9 +27,13 @@ bool is_hex(const char c) {
            ('A' <= c && c <= 'F');
 }
 
+bool is_end_delimiter(const char c) {
+    return c == '\0' || c == '|' || c == ')' || c == '}' || c == ']';
+}
+
 const char *peek(const char *pattern, const size_t *pos, const size_t lookahead) {
     if (!pattern || !pos) {
-        return NULL;
+        PARSE_ERROR("NULL pointer argument");
     }
 
     if (utf8size(pattern) < lookahead + *pos) {
@@ -49,7 +55,7 @@ const char *peek(const char *pattern, const size_t *pos, const size_t lookahead)
 
 bool match(const char *pattern, size_t *pos, const char *expected) {
     if (!pos || !expected) {
-        return false;
+        PARSE_ERROR("NULL pointer argument");
     }
     const char *peek_ptr = peek(pattern, pos, 0);
 
@@ -63,7 +69,7 @@ bool match(const char *pattern, size_t *pos, const char *expected) {
 
 const char *next(const char *pattern, size_t *pos, const size_t distance) {
     if (!pattern || !pos) {
-        return NULL;
+        PARSE_ERROR("NULL pointer argument");
     }
 
     const char *current = NULL;
@@ -77,7 +83,7 @@ const char *next(const char *pattern, size_t *pos, const size_t distance) {
 
 void strip_space(const char *pattern, size_t *pos) {
     if (!pattern || !pos) {
-        return;
+        PARSE_ERROR("NULL pointer argument");
     }
 
     while (*peek(pattern, pos, 0) == ' ') {
@@ -97,10 +103,18 @@ Node *expr(const char *pattern, size_t *pos) {
     Node *branch_node = branch(pattern, pos);
     add_child(node, branch_node);
 
-    if (match(pattern, pos, "|")) {
-        add_child(node, branch(pattern, pos));
-    } else {
-        add_child(branch_node, piece(pattern, pos));
+    const char *peek_ptr = peek(pattern, pos, 0);
+    while (peek_ptr && *peek_ptr != '\0') {
+        if (match(pattern, pos, ")")) {
+            break;
+        }
+
+        if (match(pattern, pos, "|")) {
+            add_child(node, branch(pattern, pos));
+        } else {
+            add_child(branch_node, piece(pattern, pos));
+        }
+        peek_ptr = peek(pattern, pos, 0);
     }
 
     return node;
@@ -110,7 +124,10 @@ Node *branch(const char *pattern, size_t *pos) {
     Node *node = create_node("<Branch>");
 
     const char *peek_ptr = peek(pattern, pos, 0);
-    while (peek_ptr && *peek_ptr != '\0' && *peek_ptr != ')' && *peek_ptr != '}' && *peek_ptr != ']') {
+    while (peek_ptr) {
+        if (is_end_delimiter(*peek_ptr)) {
+            break;
+        }
         add_child(node, piece(pattern, pos));
         peek_ptr = peek(pattern, pos, 0);
     }
@@ -172,16 +189,13 @@ Node *quantifier(const char *pattern, size_t *pos) {
                 if (!lower_part && !upper_part) {
                     free_node(lower_part);
                     free_node(upper_part);
-                    return NULL;
+                    PARSE_ERROR("Syntax error: Missing lower and upper bound in quantifier");
                 }
                 lower = lower_part ? lower_part : create_node("0");
                 upper = upper_part ? upper_part : create_node("-1");
             } else {
                 if (!lower_part) {
-                    // We try to consume the closing bracket just in case
-                    // that parsing can go on (tbh we might as well abort).
-                    match(pattern, pos, "}");
-                    return NULL;
+                    PARSE_ERROR("Syntax error: Missing lower bound in quantifier");
                 }
                 upper = create_node(lower_part->label);
                 lower = lower_part;
@@ -189,20 +203,20 @@ Node *quantifier(const char *pattern, size_t *pos) {
             if (!match(pattern, pos, "}")) {
                 free_node(lower);
                 free_node(upper);
-                return NULL;
+                PARSE_ERROR("Syntax error: Missing '}' in quantifier");
             }
             const int lower_val = atoi(lower->label);
             const int upper_val = atoi(upper->label);
             if (lower_val < 0) {
                 free_node(lower);
                 free_node(upper);
-                return NULL;
+                PARSE_ERROR("Syntax error: Lower bound must be a non-negative integer");
             }
             if (upper_val != -1) {
                 if (upper_val < 0 || upper_val < lower_val) {
                     free_node(lower);
                     free_node(upper);
-                    return NULL;
+                    PARSE_ERROR("Syntax error: Upper bound must be a non-negative integer greater than or equal to lower bound");
                 }
             }
             break;
@@ -224,10 +238,11 @@ Node *atom(const char *pattern, size_t *pos) {
         return NULL;
     }
 
-    Node *node = create_node("<Atom>");
+    Node *node = NULL;
     switch (*peek_ptr) {
         case '.': {
             match(pattern, pos, ".");
+            node = create_node("<Atom>");
             add_child(node, create_node("<Dot>"));
             break;
         }
@@ -235,18 +250,18 @@ Node *atom(const char *pattern, size_t *pos) {
             match(pattern, pos, "\\");
             Node *child_node = atom_escape(pattern, pos);
             if (!child_node) {
-                free_node(node);
                 return NULL;
             }
+            node = create_node("<Atom>");
             add_child(node, child_node);
             break;
         }
         case '[': {
             Node *class_node = char_class(pattern, pos);
             if (!class_node) {
-                free_node(node);
                 return NULL;
             }
+            node = create_node("<Atom>");
             add_child(node, class_node);
             break;
         }
@@ -254,15 +269,18 @@ Node *atom(const char *pattern, size_t *pos) {
             match(pattern, pos, "(");
             Node *expr_node = expr(pattern, pos);
             match(pattern, pos, ")");
+            node = create_node("<Atom>");
             add_child(node, expr_node);
             break;
         }
         default: {
             if (is_special(*peek_ptr)) {
-                free_node(node);
                 return NULL;
             }
+            node = create_node("<Atom>");
             add_child(node, literal(pattern, pos));
+
+            return node;
         }
     }
 
@@ -305,7 +323,7 @@ Node *atom_escape(const char *pattern, size_t *pos) {
             match(pattern, pos, "x");
             Node *hex = hex_sequence(pattern, pos);
             if (!hex) {
-                return NULL;
+                PARSE_ERROR("Syntax error: Invalid hex sequence");
             }
             node = create_node("<HexSeq>");
             add_child(node, hex);
@@ -316,7 +334,7 @@ Node *atom_escape(const char *pattern, size_t *pos) {
         case 'P': {
             Node *uni = unicode_sequence(pattern, pos);
             if (!uni) {
-                return NULL;
+                PARSE_ERROR("Syntax error: Invalid unicode sequence");
             }
             node = create_node("<UniSeq>");
             add_child(node, uni);
@@ -333,11 +351,11 @@ Node *atom_escape(const char *pattern, size_t *pos) {
 
 Node *hex_sequence(const char *pattern, size_t *pos) {
     if (!match(pattern, pos, "{")) {
-        return NULL;
+        PARSE_ERROR("Syntax error: Missing '{' in hex sequence");
     }
     const char *peek_ptr = peek(pattern, pos, 0);
     if (!peek_ptr || !is_hex(*peek_ptr)) {
-        return NULL;
+        PARSE_ERROR("Syntax error: Invalid hex sequence");
     }
     Node *node = create_node("");
     size_t len = 0;
@@ -348,7 +366,7 @@ Node *hex_sequence(const char *pattern, size_t *pos) {
 
     if (!match(pattern, pos, "}")) {
         free_node(node);
-        return NULL;
+        PARSE_ERROR("Syntax error: Missing '}' in hex sequence");
     }
     return node;
 }
@@ -406,6 +424,9 @@ Node *char_class(const char *pattern, size_t *pos) {
     Node *node = create_node("");
     const char *peek_ptr = peek(pattern, pos, 0);
     while (peek_ptr && *peek_ptr != '\0' && *peek_ptr != ']') {
+        if (match(pattern, pos, "^")) {
+            node->label[0] = '^';
+        }
         Node *clr = class_range(pattern, pos);
         if (!clr) {
             free_node(node);
@@ -444,8 +465,8 @@ Node *class_range(const char *pattern, size_t *pos) {
             free_node(node);
             return NULL;
         }
-        if (utf8casecmp(cla0->label, "<Perl>") || utf8casecmp(cla0->label, "<UniSeq>") ||
-            utf8casecmp(cla1->label, "<Perl>") || utf8casecmp(cla1->label, "<UniSeq>")) {
+        if (utf8casecmp(cla0->label, "<Perl>") == 0 || utf8casecmp(cla0->label, "<UniSeq>") == 0 ||
+            utf8casecmp(cla1->label, "<Perl>") == 0 || utf8casecmp(cla1->label, "<UniSeq>") == 0) {
                 free_node(cla1);
                 free_node(node);
                 return NULL;
@@ -507,5 +528,8 @@ Node *decimal_digits(const char *pattern, size_t *pos) {
 Node *build_syntax_tree(const char *pattern) {
     size_t pos = 0;
     Node *res = root(pattern, &pos);
+    if (!res) {
+        PARSE_ERROR("Syntax error: Invalid pattern");
+    }
     return res;
 }

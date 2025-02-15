@@ -1,8 +1,15 @@
 #pragma once
 
 #include <stdbool.h>
+#include <errno.h>
+#include <error.h>
 #include "ast.h"
 #include "utf8.h"
+
+#define PARSE_ERROR(message) do { \
+    error(EXIT_FAILURE, 0, "%s: %s", __PRETTY_FUNCTION__, message); \
+    exit(EXIT_FAILURE); \
+} while (0)
 
 const char *peek(const char *pattern, const size_t *pos, size_t lookahead);
 
