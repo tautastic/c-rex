@@ -1,7 +1,10 @@
 #include "lexer.h"
 
 bool is_special(const char c) {
-    return (c >= 33 && c <= 47) || (c >= 58 && c <= 64) || (c >= 91 && c <= 96) || (c >= 123 && c <= 125);
+    return (c >= 33 && c <= 47) ||
+           (c >= 58 && c <= 64) ||
+           (c >= 91 && c <= 96) ||
+           (c >= 123 && c <= 125);
 }
 
 bool is_digit(const char c) {
@@ -17,7 +20,9 @@ bool is_lowercase_letter(const char c) {
 }
 
 bool is_hex(const char c) {
-    return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F');
+    return ('0' <= c && c <= '9') ||
+           ('a' <= c && c <= 'f') ||
+           ('A' <= c && c <= 'F');
 }
 
 const char *peek(const char *pattern, const size_t *pos, const size_t lookahead) {
@@ -105,7 +110,7 @@ Node *branch(const char *pattern, size_t *pos) {
     Node *node = create_node("<Branch>");
 
     const char *peek_ptr = peek(pattern, pos, 0);
-    while (peek_ptr && *peek_ptr != '\0' && *peek_ptr != ')' && *peek_ptr != '}') {
+    while (peek_ptr && *peek_ptr != '\0' && *peek_ptr != ')' && *peek_ptr != '}' && *peek_ptr != ']') {
         add_child(node, piece(pattern, pos));
         peek_ptr = peek(pattern, pos, 0);
     }
@@ -173,6 +178,9 @@ Node *quantifier(const char *pattern, size_t *pos) {
                 upper = upper_part ? upper_part : create_node("-1");
             } else {
                 if (!lower_part) {
+                    // We try to consume the closing bracket just in case
+                    // that parsing can go on (tbh we might as well abort).
+                    match(pattern, pos, "}");
                     return NULL;
                 }
                 upper = create_node(lower_part->label);
@@ -234,7 +242,12 @@ Node *atom(const char *pattern, size_t *pos) {
             break;
         }
         case '[': {
-            //add_child(node, char_class(pattern, pos));
+            Node *class_node = char_class(pattern, pos);
+            if (!class_node) {
+                free_node(node);
+                return NULL;
+            }
+            add_child(node, class_node);
             break;
         }
         case '(': {
@@ -385,6 +398,77 @@ Node *unicode_sequence(const char *pattern, size_t *pos) {
     return node;
 }
 
+Node *char_class(const char *pattern, size_t *pos) {
+    if (!match(pattern, pos, "[")) {
+        return NULL;
+    }
+
+    Node *node = create_node("");
+    const char *peek_ptr = peek(pattern, pos, 0);
+    while (peek_ptr && *peek_ptr != '\0' && *peek_ptr != ']') {
+        Node *clr = class_range(pattern, pos);
+        if (!clr) {
+            free_node(node);
+            // We try to consume the closing bracket just in case
+            // that parsing can go on (tbh we might as well abort).
+            match(pattern, pos, "]");
+            return NULL;
+        }
+        if (clr->sub_count == 1) {
+            clr = clr->sub[0];
+        }
+        add_child(node, clr);
+        peek_ptr = peek(pattern, pos, 0);
+    }
+
+    if (!match(pattern, pos, "]")) {
+        free_node(node);
+        return NULL;
+    }
+
+    return node;
+
+}
+
+Node *class_range(const char *pattern, size_t *pos) {
+    Node *node = create_node("ClassRange");
+    Node *cla0 = class_atom(pattern, pos);
+    if (!cla0) {
+        free_node(node);
+        return NULL;
+    }
+    add_child(node, cla0);
+    if (match(pattern, pos, "-")) {
+        Node *cla1 = class_atom(pattern, pos);
+        if (!cla1) {
+            free_node(node);
+            return NULL;
+        }
+        if (utf8casecmp(cla0->label, "<Perl>") || utf8casecmp(cla0->label, "<UniSeq>") ||
+            utf8casecmp(cla1->label, "<Perl>") || utf8casecmp(cla1->label, "<UniSeq>")) {
+                free_node(cla1);
+                free_node(node);
+                return NULL;
+            }
+        add_child(node, cla1);
+    }
+
+    return node;
+}
+
+Node *class_atom(const char *pattern, size_t *pos) {
+    if (match(pattern, pos, "\\")) {
+        return atom_escape(pattern, pos);
+    }
+
+    const char *peek_ptr = peek(pattern, pos, 0);
+    if (!peek_ptr || *peek_ptr == '\0' || *peek_ptr == '\\' || *peek_ptr == ']' || *peek_ptr == '-') {
+        return NULL;
+    }
+
+    return literal(pattern, pos);
+}
+
 Node *literal(const char *pattern, size_t *pos) {
     Node *node = create_node("<Literal>");
     const char *next_ptr = next(pattern, pos, 0);
@@ -422,7 +506,6 @@ Node *decimal_digits(const char *pattern, size_t *pos) {
 
 Node *build_syntax_tree(const char *pattern) {
     size_t pos = 0;
-
     Node *res = root(pattern, &pos);
     return res;
 }
