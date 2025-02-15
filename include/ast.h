@@ -10,11 +10,10 @@ typedef struct Node {
     size_t sub_count;
 } Node;
 
-void print_tree(Node *node, const char *prefix, const int is_last);
+void print_tree(Node *node, const char *prefix, int is_last);
 
 Node *create_node();
 
-void add_child(Node *parent, Node *child);
-
 void free_node(Node *node);
 
+void add_child(Node *parent, Node *child);

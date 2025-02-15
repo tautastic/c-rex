@@ -39,7 +39,11 @@ void free_node(Node *node) {
 }
 
 void add_child(Node *parent, Node *child) {
-    Node **new_sub = (Node **)realloc(parent->sub, sizeof(Node *) * (parent->sub_count + 1));
+    if (!parent || !child) {
+        return;
+    }
+
+    Node **new_sub = realloc(parent->sub, sizeof(Node *) * (parent->sub_count + 1));
     if (!new_sub) {
         return;
     }
@@ -47,4 +51,3 @@ void add_child(Node *parent, Node *child) {
     parent->sub[parent->sub_count] = child;
     parent->sub_count++;
 }
-
